@@ -7,7 +7,7 @@ import pytz
 
 WEBHOOK = os.environ.get("WEBHOOK")
 TOKEN = os.environ.get("TOKEN")
-CHANNEL_ID = "1423730052872536094"
+CHANNEL_ID = "1434273151528734840"
 BASE_JOIN = "https://chillihub1.github.io/chillihub-joiner/?placeId=109983668079237&gameInstanceId="
 
 PHRASES = [
@@ -128,7 +128,7 @@ async def poll():
         except Exception as e:
             print(f"ERROR: {e}")
 
-        await asyncio.sleep(0.5)  # Fast but safe
+        await asyncio.sleep(0.1)  # Fast but safe
 
 async def main():
     if not WEBHOOK:
