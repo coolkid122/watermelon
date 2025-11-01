@@ -7,10 +7,10 @@ import pytz
 WEBHOOK = os.environ.get("WEBHOOK")
 TOKEN = os.environ.get("TOKEN")
 CHANNEL_ID = "1434273151528734840"
-BASE_URL = "https://discord.com/api/v9"
 BASE_JOIN = "https://chillihub1.github.io/chillihub-joiner/?placeId=109983668079237&gameInstanceId="
 
-seen = set()
+seen_msg = set()
+seen_job = set()
 client = httpx.AsyncClient(timeout=5.0, limits=httpx.Limits(max_connections=200, max_keepalive_connections=50))
 
 def format_time():
@@ -18,8 +18,9 @@ def format_time():
 
 async def send_embed(data):
     job_id = data.get("jobId", "unknown")
-    if job_id == "unknown" or len(job_id) != 36:
+    if job_id == "unknown" or len(job_id) != 36 or job_id in seen_job:
         return
+    seen_job.add(job_id)
     join_link = BASE_JOIN + job_id
     name = data.get("name", "unknown")
     money = data.get("moneyPerSec", "unknown")
@@ -42,7 +43,7 @@ async def send_embed(data):
             {"name": "Join Link", "value": f"[Click to Join]({join_link})", "inline": False},
             {"name": "Join Script (PC)", "value": f"```lua\ngame:GetService('TeleportService'):TeleportToPlaceInstance(109983668079237, \"{job_id}\", game.Players.LocalPlayer)\n```", "inline": False}
         ],
-        "footer": {"text": f"made by hiklo • today at {footer_time}"}
+        "footer": {"text": f"made by hiklo • Today at {footer_time}"}
     }
     payload = {"embeds": [embed]}
     try:
@@ -51,7 +52,7 @@ async def send_embed(data):
         pass
 
 async def poll():
-    global seen
+    global seen_msg
     headers = {
         "Authorization": TOKEN,
         "Content-Type": "application/json",
@@ -60,7 +61,7 @@ async def poll():
     last_id = None
     while True:
         try:
-            url = f"{BASE_URL}/channels/{CHANNEL_ID}/messages?limit=50"
+            url = f"https://discord.com/api/v9/channels/{CHANNEL_ID}/messages?limit=50"
             if last_id:
                 url += f"&after={last_id}"
             r = await client.get(url, headers=headers)
@@ -73,17 +74,16 @@ async def poll():
                 continue
             tasks = []
             for msg in reversed(msgs):
-                if msg["id"] in seen:
+                if msg["id"] in seen_msg:
                     continue
-                seen.add(msg["id"])
+                seen_msg.add(msg["id"])
                 for emb in msg.get("embeds", []):
                     for field in emb.get("fields", []):
                         val = field.get("value", "")
                         name_field = field.get("name", "")
                         if "Job ID" in name_field or "jobId" in val:
                             job_id_match = val.strip()
-                            if len(job_id_match) == 36 and job_id_match not in seen:
-                                seen.add(job_id_match)
+                            if len(job_id_match) == 36:
                                 content = msg.get("content", "")
                                 extracted_name = "unknown"
                                 extracted_money = "unknown"
