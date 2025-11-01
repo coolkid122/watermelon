@@ -8,6 +8,7 @@ import pytz
 WEBHOOK = os.environ.get("WEBHOOK")
 TOKEN = os.environ.get("TOKEN")
 CHANNEL_ID = "1423730052872536094"
+BASE_JOIN = "https://chillihub1.github.io/chillihub-joiner/?placeId=109983668079237&gameInstanceId="
 
 PHRASES = [
     "Chipso and Queso","Los Primos","Eviledon","Los Tacoritas","Tang Tang Keletang",
@@ -38,39 +39,51 @@ async def send_embed(name, money, players, job_id, is_rare):
             {"name": "Players", "value": players, "inline": True},
             {"name": "Job-ID (Mobile)", "value": f"||`{job_id}`||", "inline": False},
             {"name": "Job ID (PC)", "value": f"||`{job_id}`||", "inline": False},
-            {"name": "Join Link", "value": f"[Click to Join](https://chillihub1.github.io/chillihub-joiner/?placeId=109983668079237&gameInstanceId={job_id})", "inline": False},
+            {"name": "Join Link", "value": f"[Click to Join]({BASE_JOIN}{job_id})", "inline": False},
             {"name": "Join Script (PC)", "value": f"```lua\ngame:GetService('TeleportService'):TeleportToPlaceInstance(109983668079237, \"{job_id}\", game.Players.LocalPlayer)\n```", "inline": False}
         ],
         "footer": {"text": f"made by hiklo • Today at {format_time()}"}
     }
     try:
         await client.post(WEBHOOK, json={"embeds": [embed]})
-        print(f"SENT: {name} | {money_str} | {players} | {job_id}")
+        print(f"SENT: {job_id} | {name} | {money_str} | {players}")
     except Exception as e:
-        print(f"WEBHOOK ERROR: {e}")
+        print(f"WEBHOOK FAIL: {e}")
 
 async def poll():
-    headers = {"Authorization": TOKEN}
+    headers = {
+        "Authorization": TOKEN,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     last_id = None
-    print("STARTED MONITORING CHANNEL...")
+    print("STARTED. FETCHING MESSAGES...")
+
     while True:
         try:
+            # Always fetch latest 10 messages — no `after` to avoid 404
             url = f"https://discord.com/api/v9/channels/{CHANNEL_ID}/messages?limit=10"
-            if last_id:
-                url += f"&after={last_id}"
             r = await client.get(url, headers=headers)
+
             if r.status_code == 401:
-                print("INVALID TOKEN")
+                print("TOKEN INVALID — CHECK IT")
                 return
             if r.status_code == 403:
-                print("NO CHANNEL ACCESS")
+                print("NO PERMISSION TO READ CHANNEL")
+                return
+            if r.status_code == 404:
+                print("CHANNEL NOT FOUND — WRONG ID")
                 return
             if r.status_code != 200:
-                print(f"HTTP {r.status_code}")
-                await asyncio.sleep(1)
+                print(f"HTTP {r.status_code} — RETRYING...")
+                await asyncio.sleep(2)
                 continue
 
             msgs = r.json()
+            if not msgs:
+                print("NO MESSAGES YET")
+                await asyncio.sleep(2)
+                continue
+
             tasks = []
             for msg in reversed(msgs):
                 content = msg.get("content", "")
@@ -81,7 +94,7 @@ async def poll():
                 job_id = None
                 is_rare = any(p.lower() in content.lower() for p in PHRASES)
 
-                # Extract from content
+                # Parse content
                 for line in lines:
                     if line.startswith("Name"):
                         name = line.split("$", 1)[0].replace("Name", "").strip()
@@ -91,31 +104,38 @@ async def poll():
                     elif "Players:" in line:
                         players = line.split("Players:")[1].strip().split()[0]
 
-                # Extract Job ID from embeds
+                # Extract Job ID from embed
                 for emb in msg.get("embeds", []):
                     for field in emb.get("fields", []):
-                        val = field.get("value", "").strip()
-                        if "Job ID" in field.get("name", "") and len(val) == 36:
-                            job_id = val
-                            break
+                        if "Job ID" in field.get("name", ""):
+                            val = field.get("value", "").strip()
+                            if UUID_RE.match(val):
+                                job_id = val
+                                break
                     if job_id:
                         break
 
                 if job_id and job_id not in seen:
                     tasks.append(send_embed(name, money, players, job_id, is_rare))
 
-                last_id = msg["id"]
-
             if tasks:
                 await asyncio.gather(*tasks)
 
+            # Update last_id only if we have messages
+            if msgs:
+                last_id = msgs[0]["id"]
+
         except Exception as e:
-            print(f"POLL ERROR: {e}")
-        await asyncio.sleep(0.1)
+            print(f"ERROR: {e}")
+
+        await asyncio.sleep(0.5)  # Fast but safe
 
 async def main():
-    if not WEBHOOK or not TOKEN:
-        print("SET WEBHOOK AND TOKEN")
+    if not WEBHOOK:
+        print("WEBHOOK MISSING")
+        return
+    if not TOKEN:
+        print("TOKEN MISSING")
         return
     await poll()
 
