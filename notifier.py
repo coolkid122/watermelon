@@ -1,57 +1,69 @@
 import httpx
 import os
 import asyncio
-import json
+import re
 from datetime import datetime
 import pytz
 
 WEBHOOK = os.environ.get("WEBHOOK")
 TOKEN = os.environ.get("TOKEN")
-CHANNEL_ID = "1434273151528734840"
-BASE_JOIN = "https://chillihub1.github.io/chillihub-joiner/?placeId=109983668079237&gameInstanceId="
+CHANNEL_ID = "1423730052872536094"
 
+PHRASES = [
+    "Chipso and Queso","Los Primos","Eviledon","Los Tacoritas","Tang Tang Keletang",
+    "Ketupat Kepat","Tictac Sahur","La Supreme Combinasion","Ketchuru and Musturu",
+    "Garama and Madundung","Spaghetti Tualetti","Spooky and Pumpky","La Casa Boo",
+    "La Secret Combinasion","Burguro And Fryuro","Headless Horseman",
+    "Dragon Cannelloni","Meowl","Strawberry Elephant"
+]
+
+UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 seen = set()
 client = httpx.AsyncClient(timeout=10.0)
 
 def format_time():
     return datetime.now(pytz.timezone("US/Eastern")).strftime("%I:%M %p")
 
-async def send(job_id, name, money, players):
+async def send_embed(name, money, players, job_id, is_rare):
     if job_id in seen:
         return
     seen.add(job_id)
-    join_link = BASE_JOIN + job_id
     money_str = f"${int(float(money)):,}/s" if money != "unknown" else "unknown"
+    color = 16711680 if is_rare else 5814783
     embed = {
         "title": name,
-        "color": 5814783,
+        "color": color,
         "fields": [
             {"name": "Money per sec", "value": money_str, "inline": True},
             {"name": "Players", "value": players, "inline": True},
             {"name": "Job-ID (Mobile)", "value": f"||`{job_id}`||", "inline": False},
             {"name": "Job ID (PC)", "value": f"||`{job_id}`||", "inline": False},
-            {"name": "Join Link", "value": f"[Click to Join]({join_link})", "inline": False},
+            {"name": "Join Link", "value": f"[Click to Join](https://chillihub1.github.io/chillihub-joiner/?placeId=109983668079237&gameInstanceId={job_id})", "inline": False},
             {"name": "Join Script (PC)", "value": f"```lua\ngame:GetService('TeleportService'):TeleportToPlaceInstance(109983668079237, \"{job_id}\", game.Players.LocalPlayer)\n```", "inline": False}
         ],
         "footer": {"text": f"made by hiklo • Today at {format_time()}"}
     }
     try:
         await client.post(WEBHOOK, json={"embeds": [embed]})
-        print(f"Sent: {job_id}")
+        print(f"SENT: {name} | {money_str} | {players} | {job_id}")
     except Exception as e:
-        print(f"Webhook fail: {e}")
+        print(f"WEBHOOK ERROR: {e}")
 
 async def poll():
     headers = {"Authorization": TOKEN}
+    last_id = None
+    print("STARTED MONITORING CHANNEL...")
     while True:
         try:
             url = f"https://discord.com/api/v9/channels/{CHANNEL_ID}/messages?limit=10"
+            if last_id:
+                url += f"&after={last_id}"
             r = await client.get(url, headers=headers)
             if r.status_code == 401:
-                print("Bad TOKEN")
+                print("INVALID TOKEN")
                 return
             if r.status_code == 403:
-                print("No channel access")
+                print("NO CHANNEL ACCESS")
                 return
             if r.status_code != 200:
                 print(f"HTTP {r.status_code}")
@@ -60,47 +72,51 @@ async def poll():
 
             msgs = r.json()
             tasks = []
-            for msg in msgs:
+            for msg in reversed(msgs):
                 content = msg.get("content", "")
                 lines = [l.strip() for l in content.splitlines() if l.strip()]
                 name = "unknown"
                 money = "unknown"
                 players = "unknown"
                 job_id = None
+                is_rare = any(p.lower() in content.lower() for p in PHRASES)
 
+                # Extract from content
                 for line in lines:
                     if line.startswith("Name"):
-                        name = line.split("$")[0].replace("Name", "").strip()
+                        name = line.split("$", 1)[0].replace("Name", "").strip()
                     elif "$" in line and "/s" in line:
-                        money = line.split("$")[1].split("/s")[0].strip() + "000000"
+                        raw = line.split("$")[1].split("/s")[0].strip()
+                        money = raw + "000000" if "M" in raw else raw
                     elif "Players:" in line:
                         players = line.split("Players:")[1].strip().split()[0]
 
+                # Extract Job ID from embeds
                 for emb in msg.get("embeds", []):
                     for field in emb.get("fields", []):
-                        if "Job ID" in field.get("name", ""):
-                            val = field.get("value", "").strip()
-                            if len(val) == 36 and val.replace("-", "").isalnum():
-                                job_id = val
-                                break
+                        val = field.get("value", "").strip()
+                        if "Job ID" in field.get("name", "") and len(val) == 36:
+                            job_id = val
+                            break
                     if job_id:
                         break
 
-                if job_id:
-                    tasks.append(send(job_id, name, money, players))
+                if job_id and job_id not in seen:
+                    tasks.append(send_embed(name, money, players, job_id, is_rare))
+
+                last_id = msg["id"]
 
             if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                await asyncio.gather(*tasks)
 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"POLL ERROR: {e}")
         await asyncio.sleep(0.1)
 
 async def main():
     if not WEBHOOK or not TOKEN:
-        print("Set WEBHOOK and TOKEN")
+        print("SET WEBHOOK AND TOKEN")
         return
-    print("Started. Polling every 0.1s")
     await poll()
 
 if __name__ == "__main__":
