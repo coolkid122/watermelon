@@ -24,27 +24,27 @@ seen = set()
 client = httpx.AsyncClient(timeout=10.0)
 
 def format_time():
-    return datetime.now(pytz.timezone("US/Eastern")).strftime("%I:%M %p")
+    return datetime.now(pytz.timezone("US/Eastern")).isoformat()
 
-async def send_embed(name, money, players, job_id, is_rare):
+async def send_embed(brainrot, money_str, players, job_id, is_rare):
     if job_id in seen:
         return
     seen.add(job_id)
-    money_str = f"${int(float(money)):,}/s" if money != "unknown" else "unknown"
-    color = 16711680 if is_rare else 5814783
     join_link = BASE_JOIN + job_id
     embed = {
-        "title": name,
-        "color": color,
+        "title": "Hiklo Corporation | Notify",
+        "color": 0x00b0f4,
+        "timestamp": format_time(),
         "fields": [
+            {"name": "Brainrot", "value": brainrot, "inline": True},
             {"name": "Money per sec", "value": money_str, "inline": True},
-            {"name": "Players", "value": players, "inline": True},
-            {"name": "Job-ID (Mobile)", "value": f"||`{job_id}`||", "inline": False},
-            {"name": "Job ID (PC)", "value": f"||`{job_id}`||", "inline": False},
-            {"name": "Join Link", "value": f"[Click to Join]({join_link})", "inline": False},
+            {"name": "Players", "value": players, "inline": False},
+            {"name": "Job ID (Mobile)", "value": f"||`{job_id}`||", "inline": True},
+            {"name": "Job ID (PC)", "value": f"||`{job_id}`||", "inline": True},
+            {"name": "Join Link", "value": f"[Click to Join]({join_link})", "inline": True},
             {"name": "Join Script (PC)", "value": f"```lua\ngame:GetService('TeleportService'):TeleportToPlaceInstance(109983668079237, \"{job_id}\", game.Players.LocalPlayer)\n```", "inline": False}
         ],
-        "footer": {"text": f"made by hiklo • Today at {format_time()}"}
+        "footer": {"text": "made by hiklo"}
     }
     payload = {"embeds": [embed]}
 
@@ -52,7 +52,7 @@ async def send_embed(name, money, players, job_id, is_rare):
     if WEBHOOK:
         try:
             await client.post(WEBHOOK, json=payload)
-            print(f"SENT (main): {name} | {money_str} | {players}")
+            print(f"SENT MAIN: {brainrot} | {money_str} | {players}")
         except Exception as e:
             print(f"MAIN WEBHOOK ERROR: {e}")
 
@@ -60,14 +60,14 @@ async def send_embed(name, money, players, job_id, is_rare):
     if is_rare and RARE:
         try:
             await client.post(RARE, json=payload)
-            print(f"SENT (rare): {name} | {money_str} | {players}")
+            print(f"SENT RARE: {brainrot} | {money_str} | {players}")
         except Exception as e:
             print(f"RARE WEBHOOK ERROR: {e}")
 
 async def poll():
     headers = {"Authorization": TOKEN}
     last_id = None
-    print("MONITORING CHANNEL...")
+    print("MONITORING CHANNEL 1434273151528734840...")
     while True:
         try:
             url = f"https://discord.com/api/v9/channels/{CHANNEL_ID}/messages?limit=10"
@@ -91,20 +91,22 @@ async def poll():
             for msg in reversed(msgs):
                 content = msg.get("content", "")
                 lines = [l.strip() for l in content.splitlines() if l.strip()]
-                name = "unknown"
+                brainrot = "unknown"
                 money = "unknown"
-                players = "unknown"
+                players = "?/8"
                 job_id = None
                 is_rare = any(p.lower() in content.lower() for p in PHRASES)
 
                 for line in lines:
                     if line.startswith("Name"):
-                        name = line.split("$", 1)[0].replace("Name", "").strip()
+                        brainrot = line.split("$", 1)[0].replace("Name", "").strip()
                     elif "$" in line and "/s" in line:
                         raw = line.split("$")[1].split("/s")[0].strip()
                         money = raw + "000000" if "M" in raw else raw
                     elif "Players:" in line:
                         players = line.split("Players:")[1].strip().split()[0]
+
+                money_str = f"${int(float(money)):,}/s" if money != "unknown" else "unknown"
 
                 for emb in msg.get("embeds", []):
                     for field in emb.get("fields", []):
@@ -117,7 +119,7 @@ async def poll():
                         break
 
                 if job_id and job_id not in seen:
-                    tasks.append(send_embed(name, money, players, job_id, is_rare))
+                    tasks.append(send_embed(brainrot, money_str, players, job_id, is_rare))
 
                 last_id = msg["id"]
 
