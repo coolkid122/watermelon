@@ -14,17 +14,23 @@ BASE_JOIN = "https://chillihub1.github.io/chillihub-joiner/?placeId=109983668079
 PHRASES = [
     "Chipso and Queso","Los Primos","Eviledon","Los Tacoritas","Tang Tang Keletang",
     "Ketupat Kepat","Tictac Sahur","La Supreme Combinasion","Ketchuru and Musturu",
-    "Garama and Madundung","Spaghetti Tualetti","Spooky and Pumpky","La Casa Boo",
+    "Garama and Madundung","Spaghetti Tualetti","Spooky and Pumpky","La Supreme Combinasion",
     "La Secret Combinasion","Burguro And Fryuro","Headless Horseman",
     "Dragon Cannelloni","Meowl","Strawberry Elephant"
 ]
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 seen = set()
-client = httpx.AsyncClient(timeout=10.0)
+client = httpx.AsyncClient(timeout=10.0, limits=httpx.Limits(max_connections=100, max_keepalive_connections=20))
 
 def format_time():
     return datetime.now(pytz.timezone("US/Eastern")).isoformat()
+
+async def send_to_webhook(url, payload):
+    try:
+        await client.post(url, json=payload)
+    except:
+        pass
 
 async def send_embed(brainrot, money_str, players, job_id, is_rare):
     if job_id in seen:
@@ -48,26 +54,16 @@ async def send_embed(brainrot, money_str, players, job_id, is_rare):
     }
     payload = {"embeds": [embed]}
 
-    # Send to main WEBHOOK
     if WEBHOOK:
-        try:
-            await client.post(WEBHOOK, json=payload)
-            print(f"SENT MAIN: {brainrot} | {money_str} | {players}")
-        except Exception as e:
-            print(f"MAIN WEBHOOK ERROR: {e}")
-
-    # Send to RARE if rare
+        await send_to_webhook(WEBHOOK, payload)
     if is_rare and RARE:
-        try:
-            await client.post(RARE, json=payload)
-            print(f"SENT RARE: {brainrot} | {money_str} | {players}")
-        except Exception as e:
-            print(f"RARE WEBHOOK ERROR: {e}")
+        await send_to_webhook(RARE, payload)
 
 async def poll():
     headers = {"Authorization": TOKEN}
     last_id = None
-    print("MONITORING CHANNEL 1434273151528734840...")
+    print("SPYING ON CHANNEL...")
+
     while True:
         try:
             url = f"https://discord.com/api/v9/channels/{CHANNEL_ID}/messages?limit=10"
@@ -75,14 +71,7 @@ async def poll():
                 url += f"&after={last_id}"
             r = await client.get(url, headers=headers)
 
-            if r.status_code == 401:
-                print("INVALID TOKEN")
-                return
-            if r.status_code == 403:
-                print("NO CHANNEL ACCESS")
-                return
             if r.status_code != 200:
-                print(f"HTTP {r.status_code}")
                 await asyncio.sleep(1)
                 continue
 
@@ -106,15 +95,14 @@ async def poll():
                     elif "Players:" in line:
                         players = line.split("Players:")[1].strip().split()[0]
 
-                money_str = f"${int(float(money)):,}/s" if money != "unknown" else "unknown"
+                money_str = f"${int(float(money)):,}/s" if money.isdigit() else "unknown"
 
                 for emb in msg.get("embeds", []):
                     for field in emb.get("fields", []):
-                        if "Job ID" in field.get("name", ""):
-                            val = field.get("value", "").strip()
-                            if UUID_RE.match(val):
-                                job_id = val
-                                break
+                        val = field.get("value", "").strip()
+                        if "Job ID" in field.get("name", "") and UUID_RE.match(val):
+                            job_id = val
+                            break
                     if job_id:
                         break
 
@@ -124,18 +112,14 @@ async def poll():
                 last_id = msg["id"]
 
             if tasks:
-                await asyncio.gather(*tasks)
+                await asyncio.gather(*tasks, return_exceptions=True)
 
         except Exception as e:
-            print(f"POLL ERROR: {e}")
+            print(f"ERROR: {e}")
         await asyncio.sleep(0.1)
 
 async def main():
-    if not WEBHOOK:
-        print("WEBHOOK MISSING")
-        return
-    if not TOKEN:
-        print("TOKEN MISSING")
+    if not WEBHOOK or not TOKEN:
         return
     await poll()
 
